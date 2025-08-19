@@ -13,6 +13,8 @@ from ha import HA
 import builtins
 from contextlib import redirect_stdout
 import sys
+
+# --- 后端修改， 无需理会------
 # 保存原始的print函数
 original_print = builtins.print
 
@@ -39,7 +41,7 @@ font = FontProperties(
     fname=r"C:\Windows\Fonts\simhei.ttf",  # 黑体的绝对路径
     size=10
 )
-
+# --- 后端修改， 无需理会------
 
 # 命令常量
 class ControlCommand:
@@ -562,30 +564,8 @@ def visualize_results(simulation, model_path):
 
 def start_main(model_path: str = None):
     EXE_PATH = r".\net8.0\sldxunhuan.exe"
-    #"C:\Users\asus\source\repos\sldxunhuan\bin\Debug\net8.0\sldxunhuan.exe"
-    # model_path = os.environ.get("MODEL_PATH")
-
-    # # 调试：打印Python解释器路径（确认是否是目标环境）
-    # print(f"子进程Python路径:{sys.executable}")
-
-    # # 调试：打印所有可用的环境变量键名
-    # print("子进程收到的环境变量键名列表:")
-    # for key in sorted(os.environ.keys()):
-    #     print(f"- {key}")
-
-    # # 尝试接收MODEL_PATH
-    # model_path = os.environ.get("MODEL_PATH")
-    # if model_path:
-    #     print(f"成功收到MODEL_PATH: {model_path}")
-    # else:
-    #     print("未收到MODEL_PATH环境变量")
-
-    # # 检查是否收到PYTHONUNBUFFERED（用于验证环境变量传递是否完全失效）
-    # print(f"PYTHONUNBUFFERED值: {os.environ.get('PYTHONUNBUFFERED')}")
-
     MODEL_PATH = model_path
     print("MODEL_PATH:", MODEL_PATH)
-    #"C:\Users\asus\Desktop\wenjian\AutoFrame.SLDPRT"
     MAX_STRESS = 1667155999
     GENERATIONS = 3
     POPULATION_SIZE = 4
