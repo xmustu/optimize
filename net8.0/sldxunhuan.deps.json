@@ -1,0 +1,95 @@
+{
+  "runtimeTarget": {
+    "name": ".NETCoreApp,Version=v8.0",
+    "signature": ""
+  },
+  "compilationOptions": {},
+  "targets": {
+    ".NETCoreApp,Version=v8.0": {
+      "sldxunhuan/1.0.0": {
+        "dependencies": {
+          "SolidWorks.Interop.cosworks": "31.5.0.52",
+          "SolidWorks.Interop.sldtoolboxconfigureaddin": "31.5.0.52",
+          "SolidWorks.Interop.sldworks": "31.5.0.52",
+          "SolidWorks.Interop.swbrowser": "31.5.0.52",
+          "SolidWorks.Interop.swconst": "31.5.0.52"
+        },
+        "runtime": {
+          "sldxunhuan.dll": {}
+        }
+      },
+      "SolidWorks.Interop.cosworks/31.5.0.52": {
+        "runtime": {
+          "SolidWorks.Interop.cosworks.dll": {
+            "assemblyVersion": "31.5.0.52",
+            "fileVersion": "31.5.0.52"
+          }
+        }
+      },
+      "SolidWorks.Interop.sldtoolboxconfigureaddin/31.5.0.52": {
+        "runtime": {
+          "SolidWorks.Interop.sldtoolboxconfigureaddin.dll": {
+            "assemblyVersion": "31.5.0.52",
+            "fileVersion": "31.5.0.52"
+          }
+        }
+      },
+      "SolidWorks.Interop.sldworks/31.5.0.52": {
+        "runtime": {
+          "SolidWorks.Interop.sldworks.dll": {
+            "assemblyVersion": "31.5.0.52",
+            "fileVersion": "31.5.0.52"
+          }
+        }
+      },
+      "SolidWorks.Interop.swbrowser/31.5.0.52": {
+        "runtime": {
+          "SolidWorks.Interop.swbrowser.dll": {
+            "assemblyVersion": "31.5.0.52",
+            "fileVersion": "31.5.0.52"
+          }
+        }
+      },
+      "SolidWorks.Interop.swconst/31.5.0.52": {
+        "runtime": {
+          "SolidWorks.Interop.swconst.dll": {
+            "assemblyVersion": "31.5.0.52",
+            "fileVersion": "31.5.0.52"
+          }
+        }
+      }
+    }
+  },
+  "libraries": {
+    "sldxunhuan/1.0.0": {
+      "type": "project",
+      "serviceable": false,
+      "sha512": ""
+    },
+    "SolidWorks.Interop.cosworks/31.5.0.52": {
+      "type": "reference",
+      "serviceable": false,
+      "sha512": ""
+    },
+    "SolidWorks.Interop.sldtoolboxconfigureaddin/31.5.0.52": {
+      "type": "reference",
+      "serviceable": false,
+      "sha512": ""
+    },
+    "SolidWorks.Interop.sldworks/31.5.0.52": {
+      "type": "reference",
+      "serviceable": false,
+      "sha512": ""
+    },
+    "SolidWorks.Interop.swbrowser/31.5.0.52": {
+      "type": "reference",
+      "serviceable": false,
+      "sha512": ""
+    },
+    "SolidWorks.Interop.swconst/31.5.0.52": {
+      "type": "reference",
+      "serviceable": false,
+      "sha512": ""
+    }
+  }
+}
