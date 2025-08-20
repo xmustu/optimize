@@ -20,9 +20,7 @@ app = FastAPI(title="几何优化服务",)
 active_tasks = {}  # task_id -> conversation_id
 
 class optimize_parameters(BaseModel):
-    parameters:Optional[Dict[str, Any]] = Field(
-        default=None,
-    )
+    parameters: str
 # 任务状态模型
 class TaskStatus(BaseModel):
     task_id: str = Field(..., description="任务ID，用于跟踪请求")
@@ -135,9 +133,9 @@ async def run_algorithm(request: AlgorithmRequest):
     )
 
 @app.post("/sent_parameter")
-async def send_parameter(modelpath: str, request: optimize_parameters):
-    with open(f"{modelpath}/parametes.txt", "w", encoding="utf-8") as f:
-        f.write(request.parameters)
+async def send_parameter(model_path: str, request: str):
+    with open(rf"{model_path}\parametes.txt", "w", encoding="utf-8") as f:
+        f.write(request)
 
 if __name__ == '__main__':
     uvicorn.run("main:app", host="127.0.0.1", port=9100,  reload=True)
