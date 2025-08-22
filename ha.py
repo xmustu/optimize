@@ -3,7 +3,7 @@ import time
 import warnings
 
 import numpy as np
-
+import torch
 from pymoo.core.algorithm import Algorithm
 from pymoo.algorithms.soo.nonconvex.ga import GA
 from pymoo.core.evaluator import Evaluator
@@ -25,7 +25,7 @@ class NoOpEvaluator(Evaluator):
         # 不做任何评估，假设你已经在别处完成评估
         pass
 class HA(Algorithm):
-    def __init__(self, method="Adam", pop_size=100,niche_num=3, mutation_rate=1,activate_method = True,X = None, **kwargs):
+    def __init__(self, method="L-BFGS-B", pop_size=100,niche_num=3, mutation_rate=1,inherit_rate = 1.0,activate_method = True,X = None, **kwargs):
         """
         参数:
             method: 局部搜索方法，支持 "L-BFGS-B", "TNC", "SLSQP", "Powell", "trust-constr", "Adam"
@@ -39,7 +39,7 @@ class HA(Algorithm):
         self.pop_size = pop_size
         self.X = X
         self.activate_method = activate_method
-
+        self.inherit_rate = inherit_rate
         # 算法参数
         self.step_size = 1
         self.improvement = True
@@ -55,9 +55,6 @@ class HA(Algorithm):
 
     def _setup(self, problem, **kwargs):
         """设置算法参数"""
-        # print("设置算法参数...")  # 调试信息
-        # print("problem的lb:",problem.xl)
-        # print("problem的ub",problem.xu)
         super()._setup(problem, **kwargs)
         self._rng = np.random.default_rng(self.seed)
         #不让 PyMoo 自动评估个体
@@ -81,28 +78,29 @@ class HA(Algorithm):
 
     def _initialize_infill(self):
         """初始化种群"""
-        print("初始化种群...")  # 调试信息
+        # print("初始化种群...")  # 调试信息
         # 生成初始种群
         if self.X is None:
             print("self.X is None")
             pop_x = np.random.uniform(self.lb, self.ub, (self.pop_size, self.dim))
-        else:pop_x = self.X
+        else:
+            pop_x = self.X
         # 一次性批量评估
         pop_f, pop_cv = self.evaluate_fitness_cv_batch(pop_x)
 
         # 保存 cv 信息
         self.pop_cv = np.array(pop_cv).reshape(-1, 1)
         pop_f = np.array(pop_f).reshape(-1, 1)
-        print("pop.shape =", pop_x.shape)
-        print("fit.shape =", pop_f.shape)
-        print("cv.shape =", self.pop_cv.shape)
+        # print("pop.shape =", pop_x.shape)
+        # print("fit.shape =", pop_f.shape)
+        # print("cv.shape =", self.pop_cv.shape)
 
         return Population.new("X", pop_x, "F", pop_f)
 
 
     def _infill(self):
         """进化到下一代"""
-        print(f"从Generation {self.n_gen-1}进化到Generation {self.n_gen}..")  # 调试信息
+        # print(f"从Generation {self.n_gen-1}进化到Generation {self.n_gen}..")  # 调试信息
         # 获取当前种群
         pop = self.pop.get("X")
         fit = self.pop.get("F")
@@ -119,10 +117,10 @@ class HA(Algorithm):
             # 没有可行解，从所有个体中找到 cv 最小的下标
             best_index = np.argmin(cv)
 
-        print("best的index是:", best_index)
-        print("{:<6} | {:<8} | {:>13.4f} |  {:>13.10f} ".format
-              (self.n_gen - 1, self.problem.fes, float(fit[best_index]), float(cv[best_index])))
-        print("best在pop_cv中的cv",cv[best_index])
+        # print("best的index是:", best_index)
+        # print("{:<6} | {:<8} | {:>13.4f} |  {:>13.10f} ".format
+        #       (self.n_gen - 1, self.problem.fes, float(fit[best_index]), float(cv[best_index])))
+        # print("best在pop_cv中的cv",cv[best_index])
 
         # print("_infill:cv.shape:",cv.shape)
         # 更新最优解
@@ -217,9 +215,9 @@ class HA(Algorithm):
             # 优先级：先cv=0，再fit小
             return (cv > 0, cv, fitness)
 
-        previous_pop = pop
-        previous_fit = fit
-        previous_cv = cv
+        # previous_pop = pop
+        # previous_fit = fit
+        # previous_cv = cv
         # 聚类和学习
         pop, fit, cv, elite_id = self._clustering_and_learning(pop, fit,cv)
         '''
@@ -239,9 +237,9 @@ class HA(Algorithm):
         fit = fit[sorted_indices]
         cv = cv[sorted_indices]
 
-        # # 添加全局最优个体到精英中
-        # global_elite_id = np.argsort(fit[:, 0])[:self.elite_num].tolist()
-        # elite_id.extend(global_elite_id)
+        # 添加全局最优个体到精英中
+        global_elite_id = np.argsort(fit[:, 0])[:self.elite_num].tolist()
+        elite_id.extend(global_elite_id)
 
         # 去重并保持原始顺序
         elite_id = [elite_id[i] for i in sorted(np.unique(elite_id, return_index=True)[1])]
@@ -250,12 +248,19 @@ class HA(Algorithm):
         offspring_size = self.pop_size - len(elite_id)
 
         # 生成后代
-        offspring = self._inheritance(offspring_size, pop, fit)
+
+        # 通过重写的后代
+        num_to_inherit = int(self.inherit_rate * offspring_size)
+        offspring = self._inheritance(num_to_inherit, pop, fit)
+        # 没有重写的后代
+        selected_indices = np.random.choice(self.pop_size, offspring_size - num_to_inherit, replace=False)
+        selected_offspring = pop[selected_indices]
+        offspring = np.vstack((offspring, selected_offspring))
         ''''
         '''
         if not self.check_bounds(offspring):
             raise ValueError
-        print("offspring大小",offspring.shape[0])
+        # print("offspring大小",offspring.shape[0])
         ''''
         '''
         # 变异
@@ -311,17 +316,31 @@ class HA(Algorithm):
                                 key=lambda i: constraint_sort_key(new_fit[i, 0], new_cv[i, 0]))
 
         # 选出前pop_size个
+
         selected_indices = sorted_indices[:self.pop_size]
+        # selected_indices = []
+        # for _ in range(self.pop_size):
+        #     # 随机抽 tour_size 个索引
+        #     competitors = np.random.choice(sorted_indices, size=2, replace=False)
+        #     # 比较胜者：取排序靠前的那个
+        #     winner = min(competitors, key=lambda i: sorted_indices.index(i))
+        #     selected_indices.append(winner)
 
         new_pop = new_pop[selected_indices]
         new_fit = new_fit[selected_indices]
         new_cv = new_cv[selected_indices]
 
-        for i in range(5):
-            print(f"fit={new_fit[i, 0]:.4f}, cv={new_cv[i, 0]:.4f}")
+        sorted_indices = sorted(range(len(new_pop)),
+                                key=lambda i: constraint_sort_key(new_fit[i, 0], new_cv[i, 0]))
+        new_pop = new_pop[sorted_indices]
+        new_fit = new_fit[sorted_indices]
+        new_cv = new_cv[sorted_indices]
+
+        # for i in range(5):
+        #     print(f"fit={new_fit[i, 0]:.4f}, cv={new_cv[i, 0]:.4f}")
 
         offspring_no_repeat, _= np.unique(new_pop, axis=0, return_counts=True)
-        print("种群中不重复的个体数量", offspring_no_repeat.shape[0])
+        # print("种群中不重复的个体数量", offspring_no_repeat.shape[0])
         if offspring_no_repeat.shape[0] <= 2:
             self.termination.force_termination = True
         return new_pop, new_fit, new_cv
@@ -357,9 +376,9 @@ class HA(Algorithm):
             # 局部搜索
             # print("before:", pop[best_individual_idx, :5],self.problem.evaluate(pop[best_individual_idx, :]),self.calculate_cv(pop[best_individual_idx, :]))
 
-            print("best_individual_idx =", best_individual_idx)
+            # print("best_individual_idx =", best_individual_idx)
             before = self.problem.fes
-            print("local_search之前：",pop[best_individual_idx, :],fit[best_individual_idx],cv[best_individual_idx])
+            # print("local_search之前：",pop[best_individual_idx, :],fit[best_individual_idx],cv[best_individual_idx])
 
             if self.activate_method :
                 new_solution = self._local_search(pop[best_individual_idx, :],fit[best_individual_idx]+10*cv[best_individual_idx])#这里要使用自适应部分的损失函数
@@ -367,7 +386,7 @@ class HA(Algorithm):
                 new_solution = pop[best_individual_idx, :]
 
             after = self.problem.fes
-            print(f"local_search消耗了{after-before}次仿真")
+            # print(f"local_search消耗了{after-before}次仿真")
             if np.any(new_solution > self.ub) or np.any(new_solution < self.lb):
                 print(new_solution)
                 raise ValueError("x out of bounds")
@@ -380,7 +399,7 @@ class HA(Algorithm):
             fit[best_individual_idx, 0] = new_fitness
             cv[best_individual_idx, 0] = new_cv
             elite_id.append(best_individual_idx)
-            print("local_search之后：", pop[best_individual_idx, :], new_fitness,new_cv)
+            # print("local_search之后：", pop[best_individual_idx, :], new_fitness,new_cv)
         return pop, fit ,cv, elite_id
 
     def _local_search(self, x0,y0):
@@ -395,41 +414,72 @@ class HA(Algorithm):
             fitness = result[0]
 
             cv = result[1]
+
             alpha = abs(fitness).mean() * 10
 
             return fitness + alpha * cv
 
-        def approximate_gradient(f, x,y,lb=None, ub=None,  eps=1e-6):
+        def approximate_gradient(f, x, lb=None, ub=None, eps=1e-6):
             grad = np.zeros_like(x)
             fx = f(x)
             for i in range(len(x)):
                 x_eps = x.copy()
                 x_eps[i] += eps
-                # # 保证在边界范围内
+                # 保证在边界内扰动
                 if lb is not None:
-                    x_eps[i] = max(x_eps[i], lb[i])
-                if ub is not None:
-                    x_eps[i] = min(x_eps[i], ub[i])
+                    x_eps[i] = min(max(x_eps[i], lb[i]), ub[i])
                 grad[i] = (f(x_eps) - fx) / eps
             return grad
 
+        def project_gradient(grad, x, lb, ub):
+            grad_proj = grad.copy()
+            for i in range(len(x)):
+                if x[i] <= lb[i] and grad[i] < 0:
+                    grad_proj[i] = 0
+                elif x[i] >= ub[i] and grad[i] > 0:
+                    grad_proj[i] = 0
+            return grad_proj
 
-        def adam_optimize(f, x0,y0 ,lb,ub,lr=0.01, beta1=0.9, beta2=0.999, eps=1e-8, max_iter=self.dim, grad_eps=1e-6):
-            # 梯度估计
+        def adam_optimize(f, x0, y0,lb, ub, max_iter=self.dim, lr=0.01,
+                          beta1=0.9, beta2=0.999, eps=1e-8,
+                          grad_eps=1e-6, tol=1e-6, verbose=False):
             x = x0.copy()
-            y = y0.item()
             m = np.zeros_like(x)
             v = np.zeros_like(x)
+
             for t in range(1, max_iter + 1):
-                # 使用有限差分估计梯度
-                grad = approximate_gradient(f, x, y,lb,ub, eps=grad_eps)
-                # Adam 更新
+                # 1. 估计梯度（有限差分）
+                grad = approximate_gradient(f, x, lb, ub, eps=grad_eps)
+
+                # 2. 可选：梯度投影，处理边界约束
+                grad = project_gradient(grad, x, lb, ub)
+
+                # 3. 收敛判断
+                if np.linalg.norm(grad) < tol:
+                    if verbose:
+                        print(f"[Adam] 收敛于第 {t} 次迭代，梯度范数为 {np.linalg.norm(grad):.3e}")
+                    break
+
+                # 4. Adam 更新
                 m = beta1 * m + (1 - beta1) * grad
                 v = beta2 * v + (1 - beta2) * (grad ** 2)
                 m_hat = m / (1 - beta1 ** t)
                 v_hat = v / (1 - beta2 ** t)
-                x -= lr * m_hat / (np.sqrt(v_hat) + eps)
-                x = np.clip(x,lb,ub)
+
+                # 5. 参数更新
+                x_new = x - lr * m_hat / (np.sqrt(v_hat) + eps)
+
+                # 6. 投影到边界
+                x_new = np.clip(x_new, lb, ub)
+
+                # 7. 变量更新幅度判断（也可以作为收敛条件）
+                if np.linalg.norm(x_new - x) < tol:
+                    if verbose:
+                        print(f"[Adam] 收敛于第 {t} 次迭代，Δx 范数为 {np.linalg.norm(x_new - x):.3e}")
+                    x = x_new
+                    break
+
+                x = x_new
             return x
         if self.method in bounded_methods:
             bounds = [(self.lb[i], self.ub[i]) for i in range(self.dim)]
@@ -446,9 +496,12 @@ class HA(Algorithm):
 
             if self.method in ["L-BFGS-B", "SLSQP", "Powell", "trust-constr"]:
                 minimize_kwargs["options"] = {"maxiter": 1}
+            else:
+                minimize_kwargs["options"] = {"maxfun":100,"disp": True}
 
 
             result = scipy_minimize(**minimize_kwargs)
+            # print("消耗了:",result.nfev,"迭代了:",result.nit,"message:",result.message)
             result_x = np.clip(result.x, self.lb, self.ub)
 
             return result_x
@@ -489,7 +542,6 @@ class HA(Algorithm):
         '''
         '''
         out_of_bounds = np.any(offspring < self.lb, axis=1) | np.any(offspring > self.ub, axis=1)
-
         if np.any(out_of_bounds):
             print("越界个体索引：", np.where(out_of_bounds)[0])
             print("对应个体：", offspring[out_of_bounds])
@@ -611,27 +663,7 @@ class HA(Algorithm):
 
         constraint = max(np.max(x - ub), np.max(lb - x), 0)
         return constraint < tol
-    # def _mutate(self, offspring):
-    #     """改进的自适应变异"""
-    #     # 更温和的步长更新
-    #     if self.n_gen <= 2:
-    #         self.step_size = 0.1
-    #     else:
-    #         if self.improvement:
-    #             self.step_size = min(0.5, self.step_size * 1.5)  # 更温和的增长
-    #         else:
-    #             self.step_size = max(1e-4, self.step_size * 0.8)  # 更温和的衰减
-    #
-    #     mutated = np.zeros_like(offspring)
-    #     tol = 1e-6
-    #
-    #     for i in range(offspring.shape[0]):
-    #         x = offspring[i, :].reshape(-1, 1)
-    #
-    #         # 为每个个体生成不同的变异
-    #         mutated[i, :] = self._mutate_individual(x, tol)
-    #
-    #     return mutated
+
 
     def _mutate_individual(self, x, tol):
         """对单个个体进行变异"""
