@@ -12,7 +12,7 @@ import io
 import threading
 import time
 from typing import Optional, Dict, Any, List, Union
-from sldwks import start_main
+from sldwks import start_main, write_key
 import sys
 app = FastAPI(title="几何优化服务",)
 
@@ -133,9 +133,14 @@ async def run_algorithm(request: AlgorithmRequest):
     )
 
 @app.post("/sent_parameter")
-async def send_parameter(model_path: str, request: str):
-    with open(rf"{model_path}\parametes.txt", "w", encoding="utf-8") as f:
-        f.write(request)
+async def send_parameter(model_path: str):
+    print(f"收到参数：{model_path}")
+    control_file = os.path.join(model_path, "control.txt")
+    write_key(control_file, "command", "8")
+    return {
+        "status": "success",
+        "message": "收到！继续工作",
+    }
 
 if __name__ == '__main__':
     uvicorn.run("main:app", host="127.0.0.1", port=9100,  reload=True)
