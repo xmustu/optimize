@@ -3,7 +3,7 @@ import time
 import warnings
 
 import numpy as np
-
+# import torch
 from pymoo.core.algorithm import Algorithm
 from pymoo.algorithms.soo.nonconvex.ga import GA
 from pymoo.core.evaluator import Evaluator
@@ -25,7 +25,7 @@ class NoOpEvaluator(Evaluator):
         # 不做任何评估，假设你已经在别处完成评估
         pass
 class HA(Algorithm):
-    def __init__(self, method="Adam", pop_size=100,niche_num=3, mutation_rate=1,activate_method = True,X = None, **kwargs):
+    def __init__(self, method="L-BFGS-B", pop_size=100,niche_num=3, mutation_rate=1,inherit_rate = 1.0,activate_method = True,X = None, **kwargs):
         """
         参数:
             method: 局部搜索方法，支持 "L-BFGS-B", "TNC", "SLSQP", "Powell", "trust-constr", "Adam"
@@ -39,7 +39,7 @@ class HA(Algorithm):
         self.pop_size = pop_size
         self.X = X
         self.activate_method = activate_method
-
+        self.inherit_rate = inherit_rate
         # 算法参数
         self.step_size = 1
         self.improvement = True
@@ -239,9 +239,9 @@ class HA(Algorithm):
         fit = fit[sorted_indices]
         cv = cv[sorted_indices]
 
-        # # 添加全局最优个体到精英中
-        # global_elite_id = np.argsort(fit[:, 0])[:self.elite_num].tolist()
-        # elite_id.extend(global_elite_id)
+        # 添加全局最优个体到精英中
+        global_elite_id = np.argsort(fit[:, 0])[:self.elite_num].tolist()
+        elite_id.extend(global_elite_id)
 
         # 去重并保持原始顺序
         elite_id = [elite_id[i] for i in sorted(np.unique(elite_id, return_index=True)[1])]
@@ -250,7 +250,14 @@ class HA(Algorithm):
         offspring_size = self.pop_size - len(elite_id)
 
         # 生成后代
-        offspring = self._inheritance(offspring_size, pop, fit)
+
+        # 通过重写的后代
+        num_to_inherit = int(self.inherit_rate * offspring_size)
+        offspring = self._inheritance(num_to_inherit, pop, fit)
+        # 没有重写的后代
+        selected_indices = np.random.choice(self.pop_size, offspring_size - num_to_inherit, replace=False)
+        selected_offspring = pop[selected_indices]
+        offspring = np.vstack((offspring, selected_offspring))
         ''''
         '''
         if not self.check_bounds(offspring):
@@ -311,11 +318,25 @@ class HA(Algorithm):
                                 key=lambda i: constraint_sort_key(new_fit[i, 0], new_cv[i, 0]))
 
         # 选出前pop_size个
+
         selected_indices = sorted_indices[:self.pop_size]
+        # selected_indices = []
+        # for _ in range(self.pop_size):
+        #     # 随机抽 tour_size 个索引
+        #     competitors = np.random.choice(sorted_indices, size=2, replace=False)
+        #     # 比较胜者：取排序靠前的那个
+        #     winner = min(competitors, key=lambda i: sorted_indices.index(i))
+        #     selected_indices.append(winner)
 
         new_pop = new_pop[selected_indices]
         new_fit = new_fit[selected_indices]
         new_cv = new_cv[selected_indices]
+
+        sorted_indices = sorted(range(len(new_pop)),
+                                key=lambda i: constraint_sort_key(new_fit[i, 0], new_cv[i, 0]))
+        new_pop = new_pop[sorted_indices]
+        new_fit = new_fit[sorted_indices]
+        new_cv = new_cv[sorted_indices]
 
         for i in range(5):
             print(f"fit={new_fit[i, 0]:.4f}, cv={new_cv[i, 0]:.4f}")
@@ -395,41 +416,104 @@ class HA(Algorithm):
             fitness = result[0]
 
             cv = result[1]
+
             alpha = abs(fitness).mean() * 10
 
             return fitness + alpha * cv
 
-        def approximate_gradient(f, x,y,lb=None, ub=None,  eps=1e-6):
+        # def approximate_gradient(f, x,y,lb=None, ub=None,  eps=1e-6):
+        #     grad = np.zeros_like(x)
+        #     fx = f(x)
+        #     for i in range(len(x)):
+        #         x_eps = x.copy()
+        #         x_eps[i] += eps
+        #         # # 保证在边界范围内
+        #         if lb is not None:
+        #             x_eps[i] = max(x_eps[i], lb[i])
+        #         if ub is not None:
+        #             x_eps[i] = min(x_eps[i], ub[i])
+        #         grad[i] = (f(x_eps) - fx) / eps
+        #     return grad
+        #
+        #
+        # def adam_optimize(f, x0,y0 ,lb,ub,lr=0.01, beta1=0.9, beta2=0.999, eps=1e-8, max_iter=self.dim, grad_eps=1e-6):
+        #     # 梯度估计
+        #     x = x0.copy()
+        #     y = y0.item()
+        #     m = np.zeros_like(x)
+        #     v = np.zeros_like(x)
+        #     for t in range(1, max_iter + 1):
+        #         # 使用有限差分估计梯度
+        #         grad = approximate_gradient(f, x, y,lb,ub, eps=grad_eps)
+        #         # Adam 更新
+        #         m = beta1 * m + (1 - beta1) * grad
+        #         v = beta2 * v + (1 - beta2) * (grad ** 2)
+        #         m_hat = m / (1 - beta1 ** t)
+        #         v_hat = v / (1 - beta2 ** t)
+        #         x -= lr * m_hat / (np.sqrt(v_hat) + eps)
+        #         x = np.clip(x,lb,ub)
+        #     return x
+        def approximate_gradient(f, x, lb=None, ub=None, eps=1e-6):
             grad = np.zeros_like(x)
             fx = f(x)
             for i in range(len(x)):
                 x_eps = x.copy()
                 x_eps[i] += eps
-                # # 保证在边界范围内
+                # 保证在边界内扰动
                 if lb is not None:
-                    x_eps[i] = max(x_eps[i], lb[i])
-                if ub is not None:
-                    x_eps[i] = min(x_eps[i], ub[i])
+                    x_eps[i] = min(max(x_eps[i], lb[i]), ub[i])
                 grad[i] = (f(x_eps) - fx) / eps
             return grad
 
+        def project_gradient(grad, x, lb, ub):
+            grad_proj = grad.copy()
+            for i in range(len(x)):
+                if x[i] <= lb[i] and grad[i] < 0:
+                    grad_proj[i] = 0
+                elif x[i] >= ub[i] and grad[i] > 0:
+                    grad_proj[i] = 0
+            return grad_proj
 
-        def adam_optimize(f, x0,y0 ,lb,ub,lr=0.01, beta1=0.9, beta2=0.999, eps=1e-8, max_iter=self.dim, grad_eps=1e-6):
-            # 梯度估计
+        def adam_optimize(f, x0, y0,lb, ub, max_iter=self.dim, lr=0.01,
+                          beta1=0.9, beta2=0.999, eps=1e-8,
+                          grad_eps=1e-6, tol=1e-6, verbose=False):
             x = x0.copy()
-            y = y0.item()
             m = np.zeros_like(x)
             v = np.zeros_like(x)
+
             for t in range(1, max_iter + 1):
-                # 使用有限差分估计梯度
-                grad = approximate_gradient(f, x, y,lb,ub, eps=grad_eps)
-                # Adam 更新
+                # 1. 估计梯度（有限差分）
+                grad = approximate_gradient(f, x, lb, ub, eps=grad_eps)
+
+                # 2. 可选：梯度投影，处理边界约束
+                grad = project_gradient(grad, x, lb, ub)
+
+                # 3. 收敛判断
+                if np.linalg.norm(grad) < tol:
+                    if verbose:
+                        print(f"[Adam] 收敛于第 {t} 次迭代，梯度范数为 {np.linalg.norm(grad):.3e}")
+                    break
+
+                # 4. Adam 更新
                 m = beta1 * m + (1 - beta1) * grad
                 v = beta2 * v + (1 - beta2) * (grad ** 2)
                 m_hat = m / (1 - beta1 ** t)
                 v_hat = v / (1 - beta2 ** t)
-                x -= lr * m_hat / (np.sqrt(v_hat) + eps)
-                x = np.clip(x,lb,ub)
+
+                # 5. 参数更新
+                x_new = x - lr * m_hat / (np.sqrt(v_hat) + eps)
+
+                # 6. 投影到边界
+                x_new = np.clip(x_new, lb, ub)
+
+                # 7. 变量更新幅度判断（也可以作为收敛条件）
+                if np.linalg.norm(x_new - x) < tol:
+                    if verbose:
+                        print(f"[Adam] 收敛于第 {t} 次迭代，Δx 范数为 {np.linalg.norm(x_new - x):.3e}")
+                    x = x_new
+                    break
+
+                x = x_new
             return x
         if self.method in bounded_methods:
             bounds = [(self.lb[i], self.ub[i]) for i in range(self.dim)]
@@ -446,9 +530,12 @@ class HA(Algorithm):
 
             if self.method in ["L-BFGS-B", "SLSQP", "Powell", "trust-constr"]:
                 minimize_kwargs["options"] = {"maxiter": 1}
+            else:
+                minimize_kwargs["options"] = {"maxfun":100,"disp": True}
 
 
             result = scipy_minimize(**minimize_kwargs)
+            print("消耗了:",result.nfev,"迭代了:",result.nit,"message:",result.message)
             result_x = np.clip(result.x, self.lb, self.ub)
 
             return result_x

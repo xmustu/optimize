@@ -6,6 +6,10 @@ __pycache__/
 # C extensions
 *.so
 
+# 屏蔽所有 PNG 文件
+*.png
+*.PNG
+
 # Distribution / packaging
 .Python
 build/

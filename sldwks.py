@@ -1,5 +1,8 @@
 import numpy as np
 import pandas as pd
+import matplotlib
+# 在导入pyplot之前设置后端
+matplotlib.use('Agg')  # 非交互式后端，不显示GUI
 import matplotlib.pyplot as plt
 from pymoo.algorithms.soo.nonconvex.ga import GA
 from pymoo.core.problem import Problem
@@ -32,6 +35,7 @@ builtins.print = custom_print
 # 设置环境变量，确保输出不被缓冲
 os.environ["PYTHONUNBUFFERED"] = "1"
 
+
 # 仅使用Windows 10/11系统默认自带的中文字体
 plt.rcParams["font.family"] = ["SimHei", "Microsoft YaHei", "SimSun"]
 # 解决负号显示问题
@@ -41,7 +45,7 @@ font = FontProperties(
     fname=r"C:\Windows\Fonts\simhei.ttf",  # 黑体的绝对路径
     size=10
 )
-# --- 后端修改， 无需理会------
+
 
 # 命令常量
 class ControlCommand:
@@ -139,13 +143,17 @@ class GeometrySimulation:
         self.is_running = False
         self.simulation_count = 0  # 总仿真计数（包含重试）
         self.original_simulation_count = 0  # 原始参数组计数（不包含重试）
+        self.max_stress = None
 
         self.model_dir = os.path.dirname(model_path)
         self.control_file = os.path.join(self.model_dir, "control.txt")
         self.data_file = os.path.join(self.model_dir, "data.txt")
         self.log_file = os.path.join(self.model_dir, "logdebug.txt")
+        self.param_file = os.path.join(self.model_dir, "parameters.txt")
 
+        self._create_empty_param_file()
         self._init_files()
+
         self._initialize_communication()
 
     def _init_files(self):
@@ -167,6 +175,30 @@ class GeometrySimulation:
         print(f"{self.control_file}")
         print(f"{self.data_file}")
         print(f"{self.log_file}")
+
+    def _create_empty_param_file(self):
+        """创建空的parameters.txt文件（如果不存在）"""
+        try:
+            # 无论文件是否存在，先删除再创建空白文件
+            if os.path.exists(self.param_file):
+                os.remove(self.param_file)
+                print(f"已删除原有参数文件：{self.param_file}")
+                with open(self.log_file, "a", encoding="utf-8") as log_f:
+                    log_f.write(
+                        f"=== 已删除原有参数文件：{self.param_file}，时间: {time.strftime('%Y-%m-%d %H:%M:%S')} ===\n")
+
+            # 创建新的空白文件
+            with open(self.param_file, "w", encoding="utf-8") as f:
+                pass  # 写入空内容
+            print(f"已创建空白参数文件：{self.param_file}")
+            with open(self.log_file, "a", encoding="utf-8") as log_f:
+                log_f.write(
+                    f"=== 已创建空白参数文件：{self.param_file}，时间: {time.strftime('%Y-%m-%d %H:%M:%S')} ===\n")
+
+        except Exception as e:
+            print(f"处理参数文件失败：{e}")
+            with open(self.log_file, "a", encoding="utf-8") as log_f:
+                log_f.write(f"=== 处理参数文件失败：{str(e)}，时间: {time.strftime('%Y-%m-%d %H:%M:%S')} ===\n")
 
     def _initialize_communication(self):
         try:
@@ -231,11 +263,36 @@ class GeometrySimulation:
                 break
             time.sleep(1)
 
+    def _restart(self):
+        """重启外部仿真进程"""
+        print("\n尝试重启sub进程...")
+        with open(self.log_file, "a", encoding="utf-8") as f:
+            f.write(f"\n=== 尝试重启sub进程，时间: {time.strftime('%Y-%m-%d %H:%M:%S')} ===\n")
+
+        # 清理旧进程
+        self._cleanup()
+
+        # 重新初始化通信
+        try:
+            self._initialize_communication()
+            print("sub进程重启成功")
+            with open(self.log_file, "a", encoding="utf-8") as f:
+                f.write(f"=== sub进程重启成功，时间: {time.strftime('%Y-%m-%d %H:%M:%S')} ===\n")
+            return True
+        except Exception as e:
+            print(f"sub进程重启失败：{e}")
+            with open(self.log_file, "a", encoding="utf-8") as f:
+                f.write(f"=== sub进程重启失败：{str(e)}，时间: {time.strftime('%Y-%m-%d %H:%M:%S')} ===\n")
+            return False
+
     def run_simulation(self, params):
         if not self.is_running or self.process.poll() is not None:
-            raise RuntimeError("sub进程未运行，无法执行仿真")
+            print("检测到sub进程未运行")
+            # 尝试重启进程
+            if not self._restart():
+                raise RuntimeError("sub进程未运行且重启失败，无法执行仿真")
 
-        # 原始参数组计数（不随重试增加）
+        # 原始参数组计数
         self.original_simulation_count += 1
         current_original_count = self.original_simulation_count
 
@@ -243,86 +300,80 @@ class GeometrySimulation:
         if len(params) != self.param_count:
             raise ValueError(f"参数数量不匹配（需{self.param_count}个，实际{len(params)}个）")
 
-        # 重试逻辑：如果应力为0则重新发送
-        max_retries = 3  # 最大重试次数
-        retry_count = 0
-        while retry_count <= max_retries:
+        try:
+            # 更新总仿真计数（仅一次，无重试）
+            self.simulation_count += 1
+            current_total_count = self.simulation_count
+
+            # 写入参数到数据文件
+            for i in range(self.param_count):
+                write_key(self.data_file, f"param_{i}", f"{params[i]:.8f}")
+
+            # 发送参数就绪信号
+            write_key(self.control_file, "command", str(ControlCommand.PARAMS_READY))
+            print(f"发送参数（原始组#{current_original_count}）：{params}，等待sub处理...")
+            with open(self.log_file, "a", encoding="utf-8") as f:
+                f.write(
+                    f"\n=== 收到参数（原始组#{current_original_count}，总计数#{current_total_count}）：{params}，时间: {time.strftime('%Y-%m-%d %H:%M:%S')} ===\n")
+
+            start_time = time.time()
+            while True:
+                if time.time() - start_time > 300:  # 单次仿真超时时间
+                    raise TimeoutError(f"仿真超时（原始组#{current_original_count}）")
+                if self.process.poll() is not None:
+                    raise RuntimeError("sub进程已崩溃")
+
+                current_cmd = read_key(self.control_file, "command")
+                if current_cmd == str(ControlCommand.RESULT_READY):
+                    # 读取结果
+                    volume_str = read_key(self.data_file, "volume")
+                    stress_str = read_key(self.data_file, "stress")
+
+                    if not volume_str or not stress_str:
+                        raise ValueError("未获取到完整的仿真结果")
+
+                    volume = float(volume_str)
+                    stress = float(stress_str)
+                    write_key(self.control_file, "command", "")
+                    break
+                if current_cmd == str(ControlCommand.CSERROR):
+                    error_code = read_key(self.control_file, "error_code")
+                    raise RuntimeError(f"sub仿真错误（代码: {error_code}）")
+                if current_cmd == str(ControlCommand.PYERROR):
+                    error_code = read_key(self.control_file, "error_code")
+                    raise RuntimeError(f"Python交互错误（代码: {error_code}）")
+
+                time.sleep(0.5)
+
+            # 检查应力是否为0，若为0则手动设置为999999999999999
+            if stress == 0:
+                print(f"警告：原始组#{current_original_count}返回应力为0，手动设置为999999999999999")
+                with open(self.log_file, "a", encoding="utf-8") as f:
+                    f.write(
+                        f"=== 警告：原始组#{current_original_count}返回应力为0，手动设置体积和应力为999999999999999 ===\n")
+                # 手动设置体积和应力为指定值
+                volume = 999999999999999
+                stress = 999999999999999
+
+            # 正常返回结果（包括手动设置的情况）
+            print(
+                f"仿真完成（原始组#{current_original_count}，总计数#{current_total_count}）：体积={volume:.6f}, 应力={stress:.6f}")
+            with open(self.log_file, "a", encoding="utf-8") as f:
+                f.write(
+                    f"=== 仿真完成（原始组#{current_original_count}，总计数#{current_total_count}）：体积={volume:.6f}, 应力={stress:.6f}，时间: {time.strftime('%Y-%m-%d %H:%M:%S')} ===\n")
+            return volume, stress
+
+        except Exception as e:
+            print(f"仿真执行失败（原始组#{current_original_count}）: {e}")
+            with open(self.log_file, "a", encoding="utf-8") as f:
+                f.write(
+                    f"=== 仿真失败（原始组#{current_original_count}，总计数#{current_total_count}）：{str(e)}，时间: {time.strftime('%Y-%m-%d %H:%M:%S')} ===\n")
             try:
-                # 每次重试都更新总仿真计数
-                self.simulation_count += 1
-                current_total_count = self.simulation_count
-
-                # 写入参数到数据文件
-                for i in range(self.param_count):
-                    write_key(self.data_file, f"param_{i}", f"{params[i]:.8f}")
-
-                # 发送参数就绪信号
-                write_key(self.control_file, "command", str(ControlCommand.PARAMS_READY))
-                print(f"发送参数（原始组#{current_original_count}，第{retry_count + 1}次尝试）：{params}，等待sub处理...")
-                with open(self.log_file, "a", encoding="utf-8") as f:
-                    f.write(
-                        f"\n=== 收到参数（原始组#{current_original_count}，总计数#{current_total_count}）：{params}，时间: {time.strftime('%Y-%m-%d %H:%M:%S')} ===\n")
-
-                start_time = time.time()
-                while True:
-                    if time.time() - start_time > 300:  # 单次仿真超时时间
-                        raise TimeoutError(f"仿真超时（原始组#{current_original_count}）")
-                    if self.process.poll() is not None:
-                        raise RuntimeError("sub进程已崩溃")
-
-                    current_cmd = read_key(self.control_file, "command")
-                    if current_cmd == str(ControlCommand.RESULT_READY):
-                        # 读取结果
-                        volume_str = read_key(self.data_file, "volume")
-                        stress_str = read_key(self.data_file, "stress")
-
-                        if not volume_str or not stress_str:
-                            raise ValueError("未获取到完整的仿真结果")
-
-                        volume = float(volume_str)
-                        stress = float(stress_str)
-                        write_key(self.control_file, "command", "")
-                        break
-                    if current_cmd == str(ControlCommand.CSERROR):
-                        error_code = read_key(self.control_file, "error_code")
-                        raise RuntimeError(f"sub仿真错误（代码: {error_code}）")
-                    if current_cmd == str(ControlCommand.PYERROR):
-                        error_code = read_key(self.control_file, "error_code")
-                        raise RuntimeError(f"Python交互错误（代码: {error_code}）")
-
-                    time.sleep(0.5)
-
-                # 检查应力是否为0，若为0则重试
-                if stress == 0:
-                    print(f"警告：原始组#{current_original_count}第{retry_count + 1}次尝试返回应力为0，将重试...")
-                    with open(self.log_file, "a", encoding="utf-8") as f:
-                        f.write(
-                            f"=== 警告：原始组#{current_original_count}第{retry_count + 1}次尝试返回应力为0，将重试 ===\n")
-                    retry_count += 1
-                    continue  # 继续重试
-
-                # 应力不为0，正常返回结果
-                print(
-                    f"仿真完成（原始组#{current_original_count}，总计数#{current_total_count}）：体积={volume:.6f}, 应力={stress:.6f}")
-                with open(self.log_file, "a", encoding="utf-8") as f:
-                    f.write(
-                        f"=== 仿真完成（原始组#{current_original_count}，总计数#{current_total_count}）：体积={volume:.6f}, 应力={stress:.6f}，时间: {time.strftime('%Y-%m-%d %H:%M:%S')} ===\n")
-                return volume, stress
-
-            except Exception as e:
-                print(f"仿真执行失败（原始组#{current_original_count}）: {e}")
-                with open(self.log_file, "a", encoding="utf-8") as f:
-                    f.write(
-                        f"=== 仿真失败（原始组#{current_original_count}，总计数#{current_total_count}）：{str(e)}，时间: {time.strftime('%Y-%m-%d %H:%M:%S')} ===\n")
-                try:
-                    write_key(self.control_file, "command", str(ControlCommand.PYERROR))
-                    write_key(self.control_file, "error_code", "1001")
-                except:
-                    pass
-                raise
-
-        # 超过最大重试次数仍返回应力0，抛出异常
-        raise RuntimeError(f"原始组#{current_original_count}经{max_retries + 1}次尝试后仍返回应力0，无法继续")
+                write_key(self.control_file, "command", str(ControlCommand.PYERROR))
+                write_key(self.control_file, "error_code", "1001")
+            except:
+                pass
+            raise
 
     def _calculate_param_bounds(self):
         self.param_bounds = np.zeros((self.param_count, 2))
@@ -338,6 +389,78 @@ class GeometrySimulation:
             f.write("\n=== 参数范围 ===\n")
             for name, (min_val, max_val) in zip(self.param_names, self.param_bounds):
                 f.write(f"  {name}：[{min_val:.6f}, {max_val:.6f}]\n")
+
+        # 阻塞并轮询control文件中的command是否为8
+        print("等待控制命令（等待command=8）...")
+        while True:
+            # 读取control文件中的command值
+            current_cmd = read_key(self.control_file, "command")
+
+            # 检查是否为8
+            if current_cmd == "8":
+                print("检测到command=8，开始重新读取参数范围...")
+
+                # 构建parameters.txt文件路径（模型文件同目录）
+                params_file_path = os.path.join(self.model_dir, "parameters.txt")
+
+                try:
+                    # 读取parameters.txt内容（Python字典格式，单引号）
+                    with open(params_file_path, "r", encoding="utf-8") as f:
+                        content = f.read().strip()
+                    print(f"读取到parameters.txt内容：{content}")
+                    # 解析Python字典格式字符串（处理单引号）
+                    import ast
+                    param_data = ast.literal_eval(content)  # 安全解析单引号字典
+                    print(f"解析后的参数数据：{param_data}")
+                    # 更新参数范围（按param_names顺序匹配）
+                    for i, name in enumerate(self.param_names):
+                        if name in param_data:
+                            # 从字典中提取min和max
+                            self.param_bounds[i, 0] = param_data[name]['min']
+                            self.param_bounds[i, 1] = param_data[name]['max']
+                            print(f"更新参数 {name} 范围为: [{self.param_bounds[i, 0]}, {self.param_bounds[i, 1]}]")
+                        else:
+                            print(f"参数 {name} 未找到，保持原有范围")
+
+                    # 读取许用最大应力（假设参数文件中包含该键）
+                    if 'permissible_stress' in param_data:
+                        self.max_stress = param_data['permissible_stress']['max']
+                        print(f"更新许用最大应力：{self.max_stress}")
+                        with open(self.log_file, "a", encoding="utf-8") as f:
+                            f.write(f"\n=== 许用最大应力：{self.max_stress} ===\n")
+
+                    # 打印更新后的参数范围
+                    print("更新后的参数范围：")
+                    for name, (min_val, max_val) in zip(self.param_names, self.param_bounds):
+                        print(f"  {name}：[{min_val:.6f}, {max_val:.6f}]")
+
+                    # 记录更新后的参数范围到日志
+                    with open(self.log_file, "a", encoding="utf-8") as f:
+                        f.write("\n=== 更新后的参数范围 ===\n")
+                        for name, (min_val, max_val) in zip(self.param_names, self.param_bounds):
+                            f.write(f"  {name}：[{min_val:.6f}, {max_val:.6f}]\n")
+
+                    break  # 退出轮询循环
+
+                except FileNotFoundError:
+                    print(f"错误：parameters.txt文件未找到（路径：{params_file_path}）")
+                    with open(self.log_file, "a", encoding="utf-8") as f:
+                        f.write(f"\n=== 错误：parameters.txt文件未找到 ===\n")
+                    break  # 可根据需求改为继续轮询
+                except SyntaxError:
+                    print(f"错误：parameters.txt内容格式不正确（应为Python字典格式）")
+                    with open(self.log_file, "a", encoding="utf-8") as f:
+                        f.write(f"\n=== 错误：parameters.txt格式不正确 ===\n")
+                    break
+                except Exception as e:
+                    print(f"读取参数范围失败：{e}")
+                    with open(self.log_file, "a", encoding="utf-8") as f:
+                        f.write(f"\n=== 读取参数范围失败：{str(e)} ===\n")
+                    break
+
+            # 每隔1秒轮询一次
+            time.sleep(1)
+
 
     def _cleanup(self):
         self.is_running = False
@@ -366,7 +489,6 @@ class GeometrySimulation:
 
 class OptimizationProblem(Problem):
     def __init__(self, simulation, max_stress):
-        self.fes = 0
         xl = simulation.param_bounds[:, 0]
         xu = simulation.param_bounds[:, 1]
         super().__init__(
@@ -378,10 +500,10 @@ class OptimizationProblem(Problem):
         )
         self.simulation = simulation
         self.max_stress = max_stress
+        self.fes = 0  # 初始化函数评估次数为0  <-- 添加这一行
         self.simulation_results = []  # 存储每次仿真的（参数, 体积, 应力）
 
     def _evaluate(self, x, out, *args, **kwargs):
-        self.fes = x.shape[0]
         volumes = []
         stresses = []
         for params in x:
@@ -398,7 +520,7 @@ class OptimizationProblem(Problem):
         out["G"] = np.array(stresses).reshape(-1, 1) - self.max_stress
 
 
-def run_optimization(exe_path, model_path, max_stress, generations=3, population_size=5):
+def run_optimization(exe_path, model_path, generations=3, population_size=5):
     try:
         simulation = GeometrySimulation(exe_path, model_path)
     except Exception as e:
@@ -408,16 +530,13 @@ def run_optimization(exe_path, model_path, max_stress, generations=3, population
             f.write(f"=== 初始化仿真失败：{str(e)}，时间: {time.strftime('%Y-%m-%d %H:%M:%S')} ===\n")
         return None, None
 
-    problem = OptimizationProblem(simulation, max_stress)
+    #problem = OptimizationProblem(simulation, simulation.max_stress)
+    problem = OptimizationProblem(simulation, simulation.max_stress)
     algorithm = GA(
         pop_size=population_size,
         eliminate_duplicates=True,
         verbose=False
     )
-    # algorithm = HA(
-    #     pop_size=population_size,
-    #     method="Adam"
-    # )
 
     history = []
 
@@ -464,7 +583,7 @@ def run_optimization(exe_path, model_path, max_stress, generations=3, population
         feasible_solutions = [
             (params, vol, stress)
             for params, vol, stress in problem.simulation_results
-            if stress <= max_stress and stress != 0
+            if stress <= simulation.max_stress and stress != 0
         ]
 
         # 2. 选择最优解（优先从可行解中选体积最小的）
@@ -493,11 +612,11 @@ def run_optimization(exe_path, model_path, max_stress, generations=3, population
         print(f"3. 最优应力：{best_stress:.6f}")
 
         # 4. 约束判断
-        print(f"\n4. 约束条件：最大允许应力 = {max_stress:.6f}")
+        print(f"\n4. 约束条件：最大允许应力 = {simulation.max_stress:.6f}")
         if is_feasible:
-            print(f"   符合约束要求")  
+            print(f"   ✅ 符合约束要求")
         else:
-            print(f"   无可行解，将呈现体积最小的不可行解") 
+            print(f"   ❌ 无可行解，将呈现体积最小的不可行解")
 
         # 5. 写入日志
         with open(simulation.log_file, "a", encoding="utf-8") as f:
@@ -507,10 +626,10 @@ def run_optimization(exe_path, model_path, max_stress, generations=3, population
                 f.write(f"   {name}：{val:.6f}\n")
             f.write(f"\n2. 最优体积：{best_volume:.6f}\n")
             f.write(f"3. 最优应力：{best_stress:.6f}\n")
-            f.write(f"\n4. 约束条件：最大允许应力 = {max_stress:.6f}\n")
+            f.write(f"\n4. 约束条件：最大允许应力 = {simulation.max_stress:.6f}\n")
             f.write(f"   {'符合约束要求' if is_feasible else '无可行解，选中体积最小的不可行解'}\n")
     else:
-        print("未获取到有效的仿真结果")
+        print("⚠️ 未获取到有效的仿真结果")
 
     # 发送退出命令
     print("\n所有仿真完成，发送退出命令...")
@@ -563,12 +682,12 @@ def visualize_results(simulation, model_path):
 
 
 def start_main(model_path: str = None):
-    EXE_PATH = r".\net8.0\sldxunhuan.exe"
+    EXE_PATH = r"C:\Users\dell\Projects\CAutoD\wenjian\net8.0\sldxunhuan.exe"
     MODEL_PATH = model_path
     print("MODEL_PATH:", MODEL_PATH)
-    MAX_STRESS = 1667155999
-    GENERATIONS = 3
-    POPULATION_SIZE = 4
+    #MAX_STRESS = 1667155999
+    GENERATIONS = 6
+    POPULATION_SIZE = 7
 
     try:
         if not os.path.exists(EXE_PATH):
@@ -579,7 +698,7 @@ def start_main(model_path: str = None):
         res, sim = run_optimization(
             exe_path=EXE_PATH,
             model_path=MODEL_PATH,
-            max_stress=MAX_STRESS,
+            #max_stress=MAX_STRESS,
             generations=GENERATIONS,
             population_size=POPULATION_SIZE
         )
@@ -592,4 +711,4 @@ def start_main(model_path: str = None):
         input("按回车键退出...")
 
 if __name__ == '__main__':
-    start_main(r".\AutoFrame.SLDPRT")
+    start_main(r"C:\Users\dell\Projects\CAutoD\wenjian\AutoFrame.SLDPRT")

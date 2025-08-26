@@ -116,16 +116,18 @@ async def run_algorithm(request: AlgorithmRequest):
     if not check_environment():
         raise HTTPException(status_code=503, detail="算法依赖环境未就绪（SolidWorks/.NET 8.0）")
     
-    """启动算法并返回任务ID，日志通过SSE推送"""
-    task_id = request.task_id
-    active_tasks[task_id] = "running"
+    try:
+        """启动算法并返回任务ID，日志通过SSE推送"""
+        task_id = request.task_id
+        active_tasks[task_id] = "running"
 
 
-    thread = threading.Thread(target=run_algorithm_in_thread,
-                              args=(request.parameters["model_path"],),
-                              daemon=True)
-    thread.start()
-
+        thread = threading.Thread(target=run_algorithm_in_thread,
+                                args=(request.parameters["model_path"],),
+                                daemon=True)
+        thread.start()
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"启动算法失败：{e}")
     return TaskStatus(
         task_id=task_id,
         status="running",
