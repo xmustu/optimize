@@ -55,9 +55,6 @@ class HA(Algorithm):
 
     def _setup(self, problem, **kwargs):
         """设置算法参数"""
-        # print("设置算法参数...")  # 调试信息
-        # print("problem的lb:",problem.xl)
-        # print("problem的ub",problem.xu)
         super()._setup(problem, **kwargs)
         self._rng = np.random.default_rng(self.seed)
         #不让 PyMoo 自动评估个体
@@ -81,28 +78,29 @@ class HA(Algorithm):
 
     def _initialize_infill(self):
         """初始化种群"""
-        print("初始化种群...")  # 调试信息
+        # print("初始化种群...")  # 调试信息
         # 生成初始种群
         if self.X is None:
             print("self.X is None")
             pop_x = np.random.uniform(self.lb, self.ub, (self.pop_size, self.dim))
-        else:pop_x = self.X
+        else:
+            pop_x = self.X
         # 一次性批量评估
         pop_f, pop_cv = self.evaluate_fitness_cv_batch(pop_x)
 
         # 保存 cv 信息
         self.pop_cv = np.array(pop_cv).reshape(-1, 1)
         pop_f = np.array(pop_f).reshape(-1, 1)
-        print("pop.shape =", pop_x.shape)
-        print("fit.shape =", pop_f.shape)
-        print("cv.shape =", self.pop_cv.shape)
+        # print("pop.shape =", pop_x.shape)
+        # print("fit.shape =", pop_f.shape)
+        # print("cv.shape =", self.pop_cv.shape)
 
         return Population.new("X", pop_x, "F", pop_f)
 
 
     def _infill(self):
         """进化到下一代"""
-        print(f"从Generation {self.n_gen-1}进化到Generation {self.n_gen}..")  # 调试信息
+        # print(f"从Generation {self.n_gen-1}进化到Generation {self.n_gen}..")  # 调试信息
         # 获取当前种群
         pop = self.pop.get("X")
         fit = self.pop.get("F")
@@ -119,10 +117,10 @@ class HA(Algorithm):
             # 没有可行解，从所有个体中找到 cv 最小的下标
             best_index = np.argmin(cv)
 
-        print("best的index是:", best_index)
-        print("{:<6} | {:<8} | {:>13.4f} |  {:>13.10f} ".format
-              (self.n_gen - 1, self.problem.fes, float(fit[best_index]), float(cv[best_index])))
-        print("best在pop_cv中的cv",cv[best_index])
+        # print("best的index是:", best_index)
+        # print("{:<6} | {:<8} | {:>13.4f} |  {:>13.10f} ".format
+        #       (self.n_gen - 1, self.problem.fes, float(fit[best_index]), float(cv[best_index])))
+        # print("best在pop_cv中的cv",cv[best_index])
 
         # print("_infill:cv.shape:",cv.shape)
         # 更新最优解
@@ -217,9 +215,9 @@ class HA(Algorithm):
             # 优先级：先cv=0，再fit小
             return (cv > 0, cv, fitness)
 
-        previous_pop = pop
-        previous_fit = fit
-        previous_cv = cv
+        # previous_pop = pop
+        # previous_fit = fit
+        # previous_cv = cv
         # 聚类和学习
         pop, fit, cv, elite_id = self._clustering_and_learning(pop, fit,cv)
         '''
@@ -262,7 +260,7 @@ class HA(Algorithm):
         '''
         if not self.check_bounds(offspring):
             raise ValueError
-        print("offspring大小",offspring.shape[0])
+        # print("offspring大小",offspring.shape[0])
         ''''
         '''
         # 变异
@@ -342,7 +340,7 @@ class HA(Algorithm):
             print(f"fit={new_fit[i, 0]:.4f}, cv={new_cv[i, 0]:.4f}")
 
         offspring_no_repeat, _= np.unique(new_pop, axis=0, return_counts=True)
-        print("种群中不重复的个体数量", offspring_no_repeat.shape[0])
+        # print("种群中不重复的个体数量", offspring_no_repeat.shape[0])
         if offspring_no_repeat.shape[0] <= 2:
             self.termination.force_termination = True
         return new_pop, new_fit, new_cv
@@ -378,9 +376,9 @@ class HA(Algorithm):
             # 局部搜索
             # print("before:", pop[best_individual_idx, :5],self.problem.evaluate(pop[best_individual_idx, :]),self.calculate_cv(pop[best_individual_idx, :]))
 
-            print("best_individual_idx =", best_individual_idx)
+            # print("best_individual_idx =", best_individual_idx)
             before = self.problem.fes
-            print("local_search之前：",pop[best_individual_idx, :],fit[best_individual_idx],cv[best_individual_idx])
+            # print("local_search之前：",pop[best_individual_idx, :],fit[best_individual_idx],cv[best_individual_idx])
 
             if self.activate_method :
                 new_solution = self._local_search(pop[best_individual_idx, :],fit[best_individual_idx]+10*cv[best_individual_idx])#这里要使用自适应部分的损失函数
@@ -388,7 +386,7 @@ class HA(Algorithm):
                 new_solution = pop[best_individual_idx, :]
 
             after = self.problem.fes
-            print(f"local_search消耗了{after-before}次仿真")
+            # print(f"local_search消耗了{after-before}次仿真")
             if np.any(new_solution > self.ub) or np.any(new_solution < self.lb):
                 print(new_solution)
                 raise ValueError("x out of bounds")
@@ -401,7 +399,7 @@ class HA(Algorithm):
             fit[best_individual_idx, 0] = new_fitness
             cv[best_individual_idx, 0] = new_cv
             elite_id.append(best_individual_idx)
-            print("local_search之后：", pop[best_individual_idx, :], new_fitness,new_cv)
+            # print("local_search之后：", pop[best_individual_idx, :], new_fitness,new_cv)
         return pop, fit ,cv, elite_id
 
     def _local_search(self, x0,y0):
@@ -576,7 +574,6 @@ class HA(Algorithm):
         '''
         '''
         out_of_bounds = np.any(offspring < self.lb, axis=1) | np.any(offspring > self.ub, axis=1)
-
         if np.any(out_of_bounds):
             print("越界个体索引：", np.where(out_of_bounds)[0])
             print("对应个体：", offspring[out_of_bounds])
@@ -698,27 +695,7 @@ class HA(Algorithm):
 
         constraint = max(np.max(x - ub), np.max(lb - x), 0)
         return constraint < tol
-    # def _mutate(self, offspring):
-    #     """改进的自适应变异"""
-    #     # 更温和的步长更新
-    #     if self.n_gen <= 2:
-    #         self.step_size = 0.1
-    #     else:
-    #         if self.improvement:
-    #             self.step_size = min(0.5, self.step_size * 1.5)  # 更温和的增长
-    #         else:
-    #             self.step_size = max(1e-4, self.step_size * 0.8)  # 更温和的衰减
-    #
-    #     mutated = np.zeros_like(offspring)
-    #     tol = 1e-6
-    #
-    #     for i in range(offspring.shape[0]):
-    #         x = offspring[i, :].reshape(-1, 1)
-    #
-    #         # 为每个个体生成不同的变异
-    #         mutated[i, :] = self._mutate_individual(x, tol)
-    #
-    #     return mutated
+
 
     def _mutate_individual(self, x, tol):
         """对单个个体进行变异"""
