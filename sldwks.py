@@ -241,7 +241,7 @@ class GeometrySimulation:
                 if name and value:
                     self.param_names.append(name)
                     self.initial_values.append(float(value))
-                    print(f"获取参数{i}：{name} = {value}")
+                    print(f"info：获取到参数{i}：{name} = {value}")
                     break
                 else:
                     print(f"重试获取参数{i}（第{retry + 1}/{max_retry}次）...")
@@ -384,7 +384,8 @@ class GeometrySimulation:
 
         print("计算参数范围：")
         for name, (min_val, max_val) in zip(self.param_names, self.param_bounds):
-            print(f"  {name}：[{min_val:.6f}, {max_val:.6f}]")
+            #print(f"获取到参数{i}：{name} = {value}")
+            print(f" 获取参数{i}: {name}： [{min_val:.6f}, {max_val:.6f}]")
         with open(self.log_file, "a", encoding="utf-8") as f:
             f.write("\n=== 参数范围 ===\n")
             for name, (min_val, max_val) in zip(self.param_names, self.param_bounds):
@@ -532,7 +533,7 @@ def run_optimization(exe_path, model_path, generations=3, population_size=5):
 
     #problem = OptimizationProblem(simulation, simulation.max_stress)
     problem = OptimizationProblem(simulation, simulation.max_stress)
-    algorithm = GA(
+    algorithm = HA(
         pop_size=population_size,
         eliminate_duplicates=True,
         verbose=False
