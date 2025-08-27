@@ -25,7 +25,7 @@ class NoOpEvaluator(Evaluator):
         # 不做任何评估，假设你已经在别处完成评估
         pass
 class HA(Algorithm):
-    def __init__(self, method="L-BFGS-B", pop_size=100,niche_num=3, mutation_rate=1,inherit_rate = 1.0,activate_method = True,X = None, **kwargs):
+    def __init__(self, method="L-BFGS-B", pop_size=100,niche_num=3, mutation_rate=1,inherit_rate = 1.0,activate_method = False,X = None, **kwargs):
         """
         参数:
             method: 局部搜索方法，支持 "L-BFGS-B", "TNC", "SLSQP", "Powell", "trust-constr", "Adam"
