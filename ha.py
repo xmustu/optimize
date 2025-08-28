@@ -25,10 +25,10 @@ class NoOpEvaluator(Evaluator):
         # 不做任何评估，假设你已经在别处完成评估
         pass
 class HA(Algorithm):
-    def __init__(self, method="L-BFGS-B", pop_size=100,niche_num=3, mutation_rate=1,inherit_rate = 1.0,activate_method = False,X = None, **kwargs):
+    def __init__(self, method="L-BFGS-B", pop_size=100,niche_num=3, mutation_rate=1,inherit_rate = 1.0,activate_method = True,X = None, **kwargs):
         """
         参数:
-            method: 局部搜索方法，支持 "L-BFGS-B", "TNC", "SLSQP", "Powell", "trust-constr", "Adam"
+            method: 局部搜索方法，支持 "L-BFGS-B", "TNC", "SLSQP", "Powell", "trust-constr", "Adam" 以及不适用局部优化
             niche_num: 聚类数量
             mutation_rate: 变异率
         """
@@ -380,7 +380,7 @@ class HA(Algorithm):
             before = self.problem.fes
             # print("local_search之前：",pop[best_individual_idx, :],fit[best_individual_idx],cv[best_individual_idx])
 
-            if self.activate_method :
+            if self.n_gen <= 5 and self.activate_method :
                 new_solution = self._local_search(pop[best_individual_idx, :],fit[best_individual_idx]+10*cv[best_individual_idx])#这里要使用自适应部分的损失函数
             else:
                 new_solution = pop[best_individual_idx, :]
