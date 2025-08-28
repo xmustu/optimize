@@ -1,4 +1,4 @@
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
 import subprocess
 import json
 import os
@@ -11,13 +11,12 @@ import asyncio
 import io
 import threading
 import time
-from typing import Optional, Dict, Any, List, Union
-from sldwks import start_main, write_key
+from typing import Optional, Dict, Any, List, Union, Set
+from sldwks import start_main, write_key, ControlCommand
 import sys
-app = FastAPI(title="几何优化服务",)
+import queue
 
-# 存储当前运行的任务
-active_tasks = {}  # task_id -> conversation_id
+# -----schema------
 
 class optimize_parameters(BaseModel):
     parameters: str
@@ -43,6 +42,117 @@ class AlgorithmRequest(BaseModel):
     #     if not v.strip():
     #         raise ValueError('几何描述不能为空')
     #     return v
+
+
+
+app = FastAPI(title="几何优化服务",)
+
+
+# 创建线程安全的任务队列
+task_queue = queue.Queue()
+# 标记算法是否正在运行的信号量（初始为1，表示允许一个任务运行）
+semaphore = threading.Semaphore(1)
+
+# 全局变量：记录当前正在运行的任务请求（None表示无任务运行）
+active_task: Optional[AlgorithmRequest] = None
+active_task_lock = threading.Lock()  # 确保多线程安全访问
+
+
+class ConnectionManager:
+    def __init__(self): 
+        self.active_connections: Set[WebSocket] = set()
+        # 记录每个任务对应的连接
+        self.task_subscriptions: Dict[str, Set[WebSocket]] = {}
+        # 线程安全锁
+        self.lock = asyncio.Lock()
+
+    async def connect(self, websocket: WebSocket, task_id: str):
+        await websocket.accept()
+        async with self.lock:
+            self.active_connections.add(websocket)
+            if task_id:
+                if task_id not in self.task_subscriptions:
+                    self.task_subscriptions[task_id] = set()
+                self.task_subscriptions[task_id].add(websocket)
+
+    async def disconnect(self, websocket: WebSocket, task_id: str):
+        async with self.lock:
+            if websocket in self.active_connections:
+                self.acitvae_connections.remove(websocket)
+
+            if task_id and task_id in self.task_subscriptions:
+                if websocket in self.task_subscriptions[task_id]:
+                    self.task_subscriptions[task_id].remove(websocket)
+                # 如果该任务没有订阅者了，删除键节省内存
+                if not self.task_subscriptions[task_id]:
+                    del self.task_subscriptions[task_id]
+
+    async def send_and_cleanup(self, task_id: str, message: dict):
+        """向订阅了特定任务的客户端发送更新后,立即清理相关连接"""
+        async with self.lock:
+            # 获取该任务的所有订阅连接
+            connections = self.task_subscriptions.get(task_id, set()).copy()
+
+            # 发送通知
+            for connection in connections:
+                try:
+                    await connection.send_json(message)
+                    # 发送后主动断开
+                    await connection.close(code=1000, reason="任务已启动，连接关闭")
+                except Exception as e:
+                    print(f"发送通知或关闭连接失败: {str(e)}")
+            if task_id in self.task_subscriptions:
+                del self.task_subscriptions[task_id]
+            for conn in connections:
+                self.active_connections.discard(conn)
+
+
+manager = ConnectionManager()
+
+
+def algorithm_worker():
+    """算法工作线程，持续从队列中获取任务并执行, 并发送状态变更通知,最后清理连接"""
+    global active_task
+    while True:
+        # 从队列获取任务， 阻塞等待
+        request = task_queue.get()
+        try:
+            # 更新活跃任务状态
+            # 任务从pending变为running，发送通知
+            with active_task_lock:
+                active_task = request
+                print(f"开始执行算法，任务ID: {request.task_id}")
+
+            taskstatus = TaskStatus(
+                task_id=request.task_id,
+                status="running",
+                message= "任务已开始运行，可以开始监听control.txt"
+            )
+
+             # 在主线程中执行WebSocket通知
+            import asyncio
+            loop = asyncio.new_event_loop()
+            loop.run_until_complete(manager.send_and_cleanup(request, taskstatus))
+            loop.close()
+
+
+            # 运行算法
+            run_algorithm_in_thread(request.parameters["model_path"])
+
+
+            print(f"任务执行完成，任务ID: {request.task_id}")
+
+
+        except Exception as e:
+            print(f"任务{request.task_id}执行出错 : {str(e)}")
+        finally:
+            with active_task_lock:
+                active_task = None
+            task_queue.task_done()
+
+
+# 启动算法工作线程（程序启动时运行）
+threading.Thread(target=algorithm_worker, daemon=True).start()
 
 
 
@@ -112,27 +222,60 @@ async def health_check():
 
 @app.post("/run-algorithm", response_model=TaskStatus)
 async def run_algorithm(request: AlgorithmRequest):
-    """调用算法程序处理请求"""
-    if not check_environment():
-        raise HTTPException(status_code=503, detail="算法依赖环境未就绪（SolidWorks/.NET 8.0）")
-    
     try:
-        """启动算法并返回任务ID，日志通过SSE推送"""
-        task_id = request.task_id
-        active_tasks[task_id] = "running"
+        """提交算法任务"""
+        if not check_environment():
+            raise HTTPException(status_code=503, detail="算法依赖环境未就绪（SolidWorks/.NET 8.0）")
+        with active_task_lock:
+            is_duplicate = (request.task_id == active_task.task_id)
 
+        if not is_duplicate:
 
-        thread = threading.Thread(target=run_algorithm_in_thread,
-                                args=(request.parameters["model_path"],),
-                                daemon=True)
-        thread.start()
+            queue_items = []
+            while not task_queue.empty():
+                item = task_queue.get()
+                queue_items.append(item)
+                if item.task_id == request.task_id:
+                    is_duplicate = True
+            for item in queue_items:
+                task_queue.put(item)
+        if is_duplicate:
+            raise HTTPException(status_code=400, detail=f"任务ID {request.task_id} 的算法请求已存在")
+        
+        task_queue.put(request)
+        return TaskStatus(
+            task_id=request.task_id,
+            status="pending",
+            message=f"任务已加入队列，当前排队位置: {task_queue.qsize() - 1}"
+    )
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"启动算法失败：{e}")
-    return TaskStatus(
-        task_id=task_id,
-        status="running",
-        message="算法已启动"
-    )
+
+
+@app.websocket("/ws/{task_id}")
+async def websocket_endpoint(websocket: WebSocket, task_id: str):
+    """WebSocket端点，用于订阅特定任务的状态变更通知"""
+    await manager.connect(websocket, task_id)
+    try:
+        # 发送初始订阅确认
+        await websocket.send_json({
+            "task_id": task_id,
+            "status": "subscribed",
+            "message": "已成功订阅任务状态变更通知"
+        })
+    except WebSocketDisconnect:
+        manager.disconnect(websocket, task_id)
+    except Exception as e:
+        print(f"WebSocket连接错误: {e}")
+        manager.disconnect(websocket, task_id)
+
+@app.get("/queue_status")
+async def get_queue_status():
+    """获取当前队列状态"""
+    return {
+        "queue_size": task_queue.qsize(),
+        "is_running": not semaphore.acquire(blocking=False)
+    }
 
 @app.post("/sent_parameter")
 async def send_parameter(model_path: str):
