@@ -220,8 +220,8 @@ async def health_check():
         }
     }
 
-@app.post("/run-algorithm", response_model=TaskStatus)
-async def run_algorithm(request: AlgorithmRequest):
+@app.post("/submit-task", response_model=TaskStatus)
+async def submit_task(request: AlgorithmRequest):
     try:
         """提交算法任务"""
         if not check_environment():
