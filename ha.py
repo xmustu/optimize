@@ -336,8 +336,8 @@ class HA(Algorithm):
         new_fit = new_fit[sorted_indices]
         new_cv = new_cv[sorted_indices]
 
-        for i in range(5):
-            print(f"fit={new_fit[i, 0]:.4f}, cv={new_cv[i, 0]:.4f}")
+        #for i in range(5):
+        #    print(f"fit={new_fit[i, 0]:.4f}, cv={new_cv[i, 0]:.4f}")
 
         offspring_no_repeat, _= np.unique(new_pop, axis=0, return_counts=True)
         # print("种群中不重复的个体数量", offspring_no_repeat.shape[0])
